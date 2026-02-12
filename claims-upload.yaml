@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: S3 Upload Backend with Pre-signed URLs
+
+Resources:
+  # 1. The Document Storage Bucket
+  DocumentBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "claim-docs-app-${AWS::AccountId}"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [PUT]
+            AllowedOrigins: ['*'] # Restrict to your domain later
+            MaxAge: 3000
+
+  # 2. Execution Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ['s3:PutObject']
+                Resource: !Sub "arn:aws:s3:::${DocumentBucket}/*"
+              - Effect: Allow
+                Action: ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents']
+                Resource: '*'
+
+  # 3. The Signer Lambda (Node.js 18+)
+  SignerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs18.x
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref DocumentBucket
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const s3 = new AWS.S3();
+          exports.handler = async (event) => {
+            const { fileName, claimId } = event.queryStringParameters;
+            const params = {
+              Bucket: process.env.BUCKET_NAME,
+              Key: `${claimId}/${Date.now()}-${fileName}`,
+              ContentType: 'image/jpeg',
+              Expires: 300
+            };
+            const uploadURL = await s3.getSignedUrlPromise('putObject', params);
+            return {
+              statusCode: 200,
+              headers: { "Access-Control-Allow-Origin": "*" },
+              body: JSON.stringify({ uploadURL })
+            };
+          };
+
+  # 4. API Gateway
+  MyApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: ClaimUploadAPI
+
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt MyApi.RootResourceId
+      PathPart: get-url
+      RestApiId: !Ref MyApi
+
+  ApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: GET
+      ResourceId: !Ref ApiResource
+      RestApiId: !Ref MyApi
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SignerLambda.Arn}/invocations"
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ApiMethod
+    Properties:
+      RestApiId: !Ref MyApi
+      StageName: Prod
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SignerLambda
+      Principal: apigateway.amazonaws.com
+
+Outputs:
+  ApiEndpoint:
+    Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/get-url"

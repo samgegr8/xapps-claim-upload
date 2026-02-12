@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script src="/sdk/app-page-sdk.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claim Upload App</title>
+    <style>
+        :root { --primary-color: #005a9e; --bg-color: #f8f9fa; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg-color); padding: 15px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; max-width: 400px; margin: auto; }
+        .input-group { margin-bottom: 15px; }
+        .input-group label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9rem; }
+        .input-group input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        #drop-area { border: 2px dashed #ccc; border-radius: 10px; padding: 30px; text-align: center; cursor: pointer; transition: 0.3s; }
+        #drop-area:hover { border-color: var(--primary-color); background: #f0f7ff; }
+        .progress-container { width: 100%; background: #ddd; height: 6px; border-radius: 5px; margin-top: 15px; display: none; }
+        .progress-bar { width: 0%; height: 100%; background: #107c10; border-radius: 5px; transition: width 0.3s; }
+        .btn-submit { width: 100%; background: var(--primary-color); color: white; border: none; padding: 12px; border-radius: 5px; font-weight: 600; cursor: pointer; margin-top: 15px; }
+        .btn-submit:disabled { background: #ccc; cursor: not-allowed; }
+        input[type="file"] { display: none; }
+        #file-list { margin-top:10px; font-size: 0.8rem; color: #555; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>Submit Evidence</h2>
+    <div class="input-group">
+        <label>Claim ID</label>
+        <input type="text" id="claimId" placeholder="e.g., CLM-778923">
+    </div>
+
+    <div id="drop-area" onclick="document.getElementById('fileElem').click()">
+        <p>Click or Drag <strong>JPEG</strong> files here</p>
+        <input type="file" id="fileElem" multiple accept="image/jpeg" onchange="handleFiles(this.files)">
+    </div>
+
+    <div id="file-list">No files selected.</div>
+    
+    <div class="progress-container" id="prog-cont">
+        <div class="progress-bar" id="prog-bar"></div>
+    </div>
+
+    <button type="button" id="submit-btn" class="btn-submit" disabled onclick="uploadToS3()">Upload to S3</button>
+</div>
+<script >         
+    // Replace this with the 'ApiEndpoint' value from your CloudFormation Outputs
+    const API_URL = "https://o3676vg7o8.execute-api.ap-southeast-2.amazonaws.com/Prod/get-url"; 
+    
+    let filesToUpload = [];
+
+    function handleFiles(files) {
+        // Ensure only JPEGs are processed
+        filesToUpload = [...files].filter(f => f.type === "image/jpeg" || f.type === "image/jpg");
+        
+        const btn = document.getElementById('submit-btn');
+        const list = document.getElementById('file-list');
+        
+        btn.disabled = filesToUpload.length === 0;
+        list.innerText = filesToUpload.length > 0 ? `${filesToUpload.length} file(s) ready.` : "No valid JPEGs selected.";
+    }
+
+    async function uploadToS3() {
+        const claimId = document.getElementById('claimId').value.trim();
+        const progCont = document.getElementById('prog-cont');
+        const progBar = document.getElementById('prog-bar');
+        const btn = document.getElementById('submit-btn');
+
+        if (!claimId) return alert("Please enter a Claim ID.");
+
+        btn.disabled = true;
+        btn.innerText = "Processing...";
+        progCont.style.display = 'block';
+
+        for (let i = 0; i < filesToUpload.length; i++) {
+            const file = filesToUpload[i];
+
+            try {
+                // 1. Fetch the Secure Pre-signed URL from your API
+                // We pass fileName and claimId as query parameters
+                const response = await fetch(`${API_URL}?fileName=${encodeURIComponent(file.name)}&claimId=${encodeURIComponent(claimId)}`);
+                
+                if (!response.ok) throw new Error("Failed to get upload URL");
+                
+                const { uploadURL } = await response.json();
+
+                // 2. Upload the file directly to S3 using the PUT method
+                const result = await fetch(uploadURL, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'image/jpeg' },
+                    body: file
+                });
+
+                if (result.ok) {
+                    // Update progress bar
+                    let progress = Math.round(((i + 1) / filesToUpload.length) * 100);
+                    progBar.style.width = progress + '%';
+                } else {
+                    throw new Error(`Upload failed for ${file.name}`);
+                }
+
+            } catch (err) {
+                console.error(err);
+                alert("An error occurred during upload. Check console for details.");
+                btn.disabled = false;
+                btn.innerText = "Retry Upload";
+                return;
+            }
+        }
+
+        btn.innerText = "Upload Complete";
+        SDK.submit({
+                status: "Upload Complete",
+            });
+        alert("All documents successfully uploaded to S3!");
+    }
+</script>
+</body>
+</html>
