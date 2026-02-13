@@ -8,10 +8,10 @@ This repository provides a complete full-stack solution for securely uploading c
 ## 1. Solution Architecture
 The workflow utilizes a secure "Request-Then-Upload" pattern:
 
-1.  **Request:** The Cognigy xApp calls the API Gateway to request a temporary upload URL.
-2.  **Sign:** An AWS Lambda function generates a cryptographically signed URL valid for 5 minutes.
-3.  **Upload:** The xApp performs an HTTP `PUT` request to upload the file directly to S3.
-4.  **Completion:** The xApp notifies the Cognigy Flow via `SDK.submit()`, allowing the conversation to continue.
+1. **Request:** The Cognigy xApp calls the API Gateway to request a temporary upload URL.
+2. **Sign:** An AWS Lambda function generates a cryptographically signed URL valid for 5 minutes.
+3. **Upload:** The xApp performs an HTTP `PUT` request to upload the file directly to S3.
+4. **Completion:** The xApp notifies the Cognigy Flow via `SDK.submit()`, allowing the conversation to continue.
 
 
 
@@ -30,12 +30,13 @@ The `template.yaml` file automates the deployment of the following AWS resources
 ## 3. Frontend Component (Cognigy xApp)
 The HTML5 interface is optimized for mobile and desktop use within the Cognigy environment.
 
+### Interface Preview
+![Form Upload Interface](./form_upload.jpg)
+
 ### Key Features
 * **Security:** Restricts uploads to `image/jpeg`.
 * **User Experience:** Drag-and-drop support, real-time progress bar, and file count validation.
 * **Data Organization:** Files are automatically stored in S3 using the path: `{{claimId}}/{{timestamp}}-{{fileName}}`.
-
-
 
 ---
 
